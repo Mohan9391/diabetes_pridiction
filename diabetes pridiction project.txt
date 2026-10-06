@@ -1,0 +1,136 @@
+import time
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
+st.set_page_config(page_title="Diabetes Predictor", page_icon="🩺", layout="wide")
+FEATURES = ["Pregnancies", "Glucose", "BloodPressure", "SkinThickness",
+            "Insulin", "BMI", "DiabetesPedigreeFunction", "Age"]
+ZERO_AS_MISSING = ["Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI"]
+# ---------------- Animated CSS ----------------
+st.markdown("""
+<style>
+@keyframes gradientMove {0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+@keyframes fadeUp {from{opacity:0;transform:translateY(25px)}to{opacity:1;transform:translateY(0)}}
+@keyframes heartbeat {0%,100%{transform:scale(1)}15%{transform:scale(1.25)}30%{transform:scale(1)}45%{transform:scale(1.2)}60%{transform:scale(1)}}
+@keyframes pulseGlow {0%,100%{box-shadow:0 0 0 0 rgba(0,180,216,.5)}50%{box-shadow:0 0 18px 6px rgba(0,180,216,.25)}}
+@keyframes shake {0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-6px)}40%,80%{transform:translateX(6px)}}
+@keyframes pop {0%{transform:scale(.6);opacity:0}70%{transform:scale(1.08)}100%{transform:scale(1);opacity:1}}
+.hero{background:linear-gradient(-45deg,#0077b6,#00b4d8,#7b2ff7,#f107a3);background-size:400% 400%;
+      animation:gradientMove 10s ease infinite, fadeUp .9s ease;padding:30px;border-radius:18px;
+      color:white;text-align:center;margin-bottom:20px}
+.hero h1{margin:0;font-size:2.4rem}
+.heart{display:inline-block;animation:heartbeat 1.4s infinite}
+.result{animation:pop .7s ease both;padding:26px;border-radius:16px;text-align:center;color:white;font-size:1.6rem;font-weight:700}
+.safe{background:linear-gradient(135deg,#11998e,#38ef7d)}
+.risk{background:linear-gradient(135deg,#cb2d3e,#ef473a);animation:pop .7s ease both, shake .6s .7s}
+div[data-testid="stSidebar"] button, div.stButton>button{animation:pulseGlow 2.2s infinite;border-radius:10px;font-weight:700;transition:transform .2s}
+div.stButton>button:hover{transform:scale(1.05)}
+div[data-testid="stMetric"]{animation:fadeUp .7s ease both}
+</style>
+<div class="hero">
+  <h1><span class="heart">❤️</span> Diabetes Prediction System</h1>
+  <p>Enter the 8 health features and get an instant risk prediction</p>
+</div>
+""", unsafe_allow_html=True)
+# ---------------- Data & model ----------------
+@st.cache_data
+def load_data(file):
+    df = pd.read_csv(file)
+    df = df[FEATURES + ["Outcome"]].copy()
+    for col in ZERO_AS_MISSING:
+        df[col] = df[col].replace(0, np.nan)
+        df[col] = df[col].fillna(df[col].median())
+    return df
+@st.cache_resource
+def train(df):
+    X, y = df[FEATURES], df["Outcome"]
+    X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+    model = RandomForestClassifier(n_estimators=300, random_state=42)
+    model.fit(X_tr, y_tr)
+    return model, accuracy_score(y_te, model.predict(X_te))
+# Load local diabetes.csv if present, otherwise auto-fetch standard dataset or allow upload
+DATA_URL = "https://raw.githubusercontent.com/plotly/datasets/master/diabetes.csv"
+if os.path.exists("diabetes.csv"):
+    data_file = "diabetes.csv"
+else:
+    try:
+        data_file = DATA_URL
+    except Exception:
+        data_file = None
+if data_file is None:
+    st.info("📂 diabetes.csv not found next to the app. Upload the Pima Indians Diabetes dataset.")
+    data_file = st.file_uploader("Upload diabetes.csv", type="csv")
+    if data_file is None:
+        st.stop()
+df = load_data(data_file)
+model, acc = train(df)
+medians = df[FEATURES].median()
+means = df[FEATURES].mean()
+# ---------------- Sidebar inputs ----------------
+st.sidebar.header("🧾 Patient Details")
+pregnancies = st.sidebar.number_input("Pregnancies", 0, 20, 1)
+glucose = st.sidebar.slider("Glucose (mg/dL)", 0, 250, 120)
+bp = st.sidebar.slider("Blood Pressure (mm Hg)", 0, 200, 70)
+skin = st.sidebar.slider("Skin Thickness (mm)", 0, 100, 20)
+insulin = st.sidebar.slider("Insulin (mu U/ml)", 0, 900, 80)
+bmi = st.sidebar.number_input("BMI", 0.0, 70.0, 25.0, step=0.1)
+dpf = st.sidebar.number_input("Diabetes Pedigree Function", 0.0, 3.0, 0.5, step=0.001, format="%.3f")
+age = st.sidebar.number_input("Age", 1, 120, 30)
+predict = st.sidebar.button("🔍 Predict", use_container_width=True)
+st.sidebar.caption(f"Model: Random Forest • Test accuracy: {acc:.1%}")
+values = dict(zip(FEATURES, [pregnancies, glucose, bp, skin, insulin, bmi, dpf, age]))
+# ---------------- Prediction ----------------
+if predict:
+    inp = pd.DataFrame([values])
+    for col in ZERO_AS_MISSING:
+        if inp.at[0, col] == 0:
+            inp.at[0, col] = medians[col]
+    with st.spinner("Analyzing health data..."):
+        time.sleep(1.2)
+        prob = float(model.predict_proba(inp)[0][1])
+        pred = int(prob >= 0.5)
+    if pred:
+        st.markdown('<div class="result risk">⚠️ High Risk: Likely Diabetic</div>', unsafe_allow_html=True)
+        st.snow()
+    else:
+        st.markdown('<div class="result safe">✅ Low Risk: Likely Non-Diabetic</div>', unsafe_allow_html=True)
+        st.balloons()
+    g1, g2 = st.columns(2)
+    with g1:
+        fig = go.Figure(go.Indicator(
+            mode="gauge+number", value=prob * 100, number={"suffix": "%"},
+            title={"text": "Diabetes Probability"},
+            gauge={"axis": {"range": [0, 100]}, "bar": {"color": "#ef473a" if pred else "#11998e"},
+                   "steps": [{"range": [0, 35], "color": "#d4f8e8"},
+                             {"range": [35, 65], "color": "#fff3cd"},
+                             {"range": [65, 100], "color": "#f8d7da"}]}))
+        fig.update_layout(height=320, margin=dict(t=60, b=10), transition={"duration": 800})
+        st.plotly_chart(fig, use_container_width=True)
+    with g2:
+        comp = go.Figure()
+        comp.add_bar(name="Patient", x=FEATURES, y=[values[f] for f in FEATURES], marker_color="#00b4d8")
+        comp.add_bar(name="Dataset Avg", x=FEATURES, y=[means[f] for f in FEATURES], marker_color="#7b2ff7")
+        comp.update_layout(barmode="group", height=320, margin=dict(t=40, b=10),
+                           title="Patient vs Dataset Average", transition={"duration": 800})
+        st.plotly_chart(comp, use_container_width=True)
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Glucose", glucose, "High" if glucose >= 126 else "Normal", delta_color="inverse")
+    m2.metric("BMI", f"{bmi:.1f}", "Overweight" if bmi >= 25 else "Healthy", delta_color="inverse")
+    m3.metric("Blood Pressure", bp, "High" if bp >= 90 else "Normal", delta_color="inverse")
+    m4.metric("Age", age)
+else:
+    st.info("👈 Fill in the patient details in the sidebar and click *Predict*.")
+    st.subheader("📈 Dataset Overview")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Records", len(df))
+    c2.metric("Diabetic", int(df["Outcome"].sum()))
+    c3.metric("Non-Diabetic", int((df["Outcome"] == 0).sum()))
+    imp = pd.Series(model.feature_importances_, index=FEATURES).sort_values()
+    fig = go.Figure(go.Bar(x=imp.values, y=imp.index, orientation="h", marker_color="#00b4d8"))
+    fig.update_layout(title="Feature Importance", height=380, margin=dict(t=50, b=10))
+    st.plotly_chart(fig, use_container_width=True)
+st.caption("⚠️ Educational use only. Not a medical diagnosis; consult a doctor.")
